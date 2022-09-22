@@ -1,10 +1,20 @@
 import { Request, Response, NextFunction } from 'express'
 import path from 'path';
 import { Account } from '../models/Account';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import { ObjectId } from 'mongodb'
+import AppMongoClient from '../database/database';
 
 const __dirname = path.resolve();
 const registerLoginEJS = path.join(__dirname, '/src/views/register-login.ejs');
-
+interface IAccountInfo{
+    _id: ObjectId | string; // ObjectID porque o ID vem dentro de um Objeto BSON (do Mongo) !! <<
+    username: string;
+    email: string;
+    password: string;
+    type: string;
+}
 export class RegisterLoginController{
     async registerOrLogin(req: Request, res: Response, next: NextFunction){
 
@@ -33,7 +43,9 @@ export class RegisterLoginController{
             }
             
             try {
-                const createAccount = new Account(registerUsername, registerEmail, registerPassword, 'user');
+                const encryptPassword = await bcrypt.hash(registerPassword, 10);
+
+                const createAccount = new Account(registerUsername, registerEmail, encryptPassword, 'user');
 
                 createAccount.saveInMongo();
 
@@ -49,15 +61,49 @@ export class RegisterLoginController{
 
         else if(loginEmail && loginPassword){
 
+                    // Try catch só para mais Segurança, porque não precisava necessariamente...
+            try{
+                const verifyLogin = await Account.loginAccount(loginEmail, loginPassword) as unknown as false & IAccountInfo;
+
+                    // Precisa converter o ID para STRING, com o .toString() !! <<
+                const { _id, username, email, type } = verifyLogin;
+
+                if(!verifyLogin){
+                    req.flash('errorFlash', 'Usuário ou senha inválida !');
+                    console.log('Inválido.');
+                    return res.redirect('/account');
+                }
+
+                const createJWT = jwt.sign({
+                    id: _id.toString(),
+                    username,
+                    email,
+                    type
+                }, "" + process.env.JWT_HASH, {
+                    expiresIn: '12h'
+                });
+
                 // Cookie assinado com o Segredo passado no Cookie Parser (app.ts) !!
                 //  OBS: Colocar secure true no DEPLOY !! <<
-            res.cookie('session_auth', 'JWT', {signed: true});
+                res.cookie('session_auth', createJWT, { signed: true, httpOnly: true });
 
                 // Pega o Cookie SEM a Assinatura !! <<
-            const { session_auth } = req.signedCookies;
+                const { session_auth } = req.signedCookies;
+                console.log('COOKIE:', session_auth);
 
-            req.flash('successFlash', 'Logado com sucesso !');
-            return res.redirect('/account');
+                const searchUserByID = await AppMongoClient.db().collection('accounts').findOne({_id: _id}) as IAccountInfo;
+                console.log('BY ID:', searchUserByID);
+
+                req.flash('successFlash', 'Logado com sucesso !');
+
+                return res.redirect('/dashboard');
+            }
+            catch(error){
+                console.log(error);
+                req.flash('errorFlash', 'Usuário ou senha inválida !');
+                return res.redirect('/account');
+            }
+
         }
         
         else{

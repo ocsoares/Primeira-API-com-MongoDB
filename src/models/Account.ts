@@ -1,4 +1,6 @@
 import AppMongoClient from "../database/database";
+import bcrypt from 'bcrypt';
+import { ObjectId } from 'mongodb';
 
 export class Account{
     username: string
@@ -31,5 +33,50 @@ export class Account{
         const accountsCollection = AppMongoClient.db().collection('accounts').find().toArray();
 
         return accountsCollection;
+    }
+
+    static async searchAccountByID(id: string){
+        const idToBSON = new ObjectId(id);
+
+        const searchAccountByID = await AppMongoClient.db().collection('accounts').findOne({_id: idToBSON})
+
+        return searchAccountByID;
+    }
+
+    static async loginAccount(email: string, password: string){
+
+        const searchUserByEmail = await AppMongoClient.db().collection('accounts').findOne({email});
+
+        if(searchUserByEmail === null){
+            return false;
+        }
+
+        const decryptPassword = await bcrypt.compare(password, searchUserByEmail.password)
+
+        if(decryptPassword !== true){
+            return false;
+        }
+        
+        return searchUserByEmail;
+    }
+
+    static async deleteAccountByID(id: string){
+        const idToBSON = new ObjectId(id);
+
+        const deleteAccountByID = await AppMongoClient.db().collection('accounts').deleteOne({_id: idToBSON});
+
+        return deleteAccountByID
+    }
+
+    static async updateAccountByID(id: string, username?: string, email?: string, password?: string){
+
+            // Esse $set é responsável por EDITAR os Valores existentes na Collection !!
+        const updateAccountByID =  await AppMongoClient.db().collection('accounts').updateOne({_id: new ObjectId(id)}, {$set: {
+            username,
+            email,
+            password
+        }})
+
+        return updateAccountByID;
     }
 }
